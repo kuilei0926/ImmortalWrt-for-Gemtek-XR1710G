@@ -1,3 +1,6 @@
+src-git nps https://github.com/djylb/nps-openwrt.git
+src-git openclash https://github.com/vernesong/OpenClash.git
+src-git tailscale https://github.com/whzhni1/luci-app-tailscale.git^745b6ab9b0a44727fac7daf54cce4adb35592e17
 src-git packages https://github.com/immortalwrt/packages.git
 src-git luci https://github.com/immortalwrt/luci.git
 src-git routing https://github.com/openwrt/routing.git

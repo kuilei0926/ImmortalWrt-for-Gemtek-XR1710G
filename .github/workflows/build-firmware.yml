@@ -2,19 +2,6 @@ name: Build Router Firmware
 
 on:
   workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release Type'
-        required: true
-        default: 'none'
-        type: choice
-        options:
-          - none
-          - release
-          - prerelease
-      release_notes:
-        description: 'Release Notes'
-        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -41,10 +28,206 @@ jobs:
           echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "full=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Resolve build-time variables (diagnostic)
+        env:
+          WIFI_SSID: ${{ vars.WIFI_SSID }}
+          WIFI_PASSWORD: ${{ vars.WIFI_PASSWORD }}
+          FIREWALL_IPV6_RULE: ${{ vars.FIREWALL_IPV6_RULE }}
+          LAN_IP: ${{ vars.LAN_IP }}
+          DHCP_CONFIG: ${{ vars.DHCP_CONFIG }}
+          DHCP_OPTION: ${{ vars.DHCP_OPTION }}
+          NPC_CONFIG: ${{ vars.NPC_CONFIG }}
+          TAILSCALE_CONFIG: ${{ vars.TAILSCALE_CONFIG }}
+          WOL_CONFIG: ${{ vars.WOL_CONFIG }}
+        run: |
+          echo "WIFI_SSID='${WIFI_SSID:-<empty>}'"
+          if [ -n "$WIFI_PASSWORD" ]; then echo "WIFI_PASSWORD='<set>'"; else echo "WIFI_PASSWORD='<empty>'"; fi
+          if [ -n "$FIREWALL_IPV6_RULE" ]; then
+            echo "FIREWALL_IPV6_RULE='<set>' first line: $(printf '%s\n' "$FIREWALL_IPV6_RULE" | head -n1)"
+          else
+            echo "FIREWALL_IPV6_RULE='<empty>'"
+          fi
+          echo "LAN_IP='${LAN_IP:-<empty>}'"
+          if [ -n "$DHCP_CONFIG" ]; then echo "DHCP_CONFIG='<set>'"; else echo "DHCP_CONFIG='<empty>'"; fi
+          echo "DHCP_OPTION='${DHCP_OPTION:-<empty>}'"
+          if [ -n "$NPC_CONFIG" ]; then echo "NPC_CONFIG='<set>' first line: $(printf '%s\n' "$NPC_CONFIG" | head -n1)"; else echo "NPC_CONFIG='<empty>'"; fi
+          if [ -n "$TAILSCALE_CONFIG" ]; then echo "TAILSCALE_CONFIG='<set>' first line: $(printf '%s\n' "$TAILSCALE_CONFIG" | head -n1)"; else echo "TAILSCALE_CONFIG='<empty>'"; fi
+          if [ -n "$WOL_CONFIG" ]; then echo "WOL_CONFIG='<set>' first line: $(printf '%s\n' "$WOL_CONFIG" | head -n1)"; else echo "WOL_CONFIG='<empty>'"; fi
+          echo "NOTE: values come from repo Settings > Secrets and variables > Actions > Variables (vars.*), repo scope"
+
       - name: Setup build environment
         run: |
           sudo apt update
           sudo apt install -y build-essential clang gcc g++ binutils bzip2 gawk gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip wget xsltproc zlib1g-dev file which perl sed make
+
+      - name: Set root password
+        env:
+          ROOT_PASSWORD: ${{ secrets.PASSWORD }}
+        run: |
+          if [ -n "$ROOT_PASSWORD" ]; then
+            HASH=$(openssl passwd -6 "$ROOT_PASSWORD")
+
+            sed -i "s|^root::|root:${HASH}:|" \
+              package/base-files/files/etc/shadow
+
+            echo "Root password hash injected"
+          else
+            echo "PASSWORD secret is empty, skip root password injection"
+          fi
+
+      - name: Inject DHCP static leases
+        env:
+          DHCP_CONFIG: ${{ vars.DHCP_CONFIG }}
+        run: |
+          if [ -n "$DHCP_CONFIG" ]; then
+            printf '%s\n' "$DHCP_CONFIG" >> package/network/services/dnsmasq/files/dhcp.conf
+            echo "DHCP static leases injected"
+          else
+            echo "No DHCP_CONFIG variable, skipping"
+          fi
+
+      - name: Inject DHCP option
+        env:
+          DHCP_OPTION: ${{ vars.DHCP_OPTION }}
+        run: |
+          if [ -n "$DHCP_OPTION" ]; then
+            sed -i "/option dhcpv6\tdisabled/a\\\\tlist dhcp_option\\t'${DHCP_OPTION}'" package/network/services/dnsmasq/files/dhcp.conf
+            echo "DHCP option injected"
+          else
+            echo "No DHCP_OPTION variable, skipping"
+          fi
+
+      - name: Inject Firewall IPv6 rule
+        env:
+          FIREWALL_IPV6_RULE: ${{ vars.FIREWALL_IPV6_RULE }}
+        run: |
+          if [ -n "$FIREWALL_IPV6_RULE" ]; then
+            # This build uses firewall4 (nftables): CONFIG_PACKAGE_firewall4=y,
+            # and /etc/config/firewall is copied from the downloaded firewall4
+            # git source, NOT from package/network/config/firewall/files/.
+            # So instead we ship a uci-defaults script (run once on first boot,
+            # before firewall starts) that appends the rule to the real config.
+            DEST="target/linux/airoha/an7581/base-files/etc/uci-defaults/99-firewall-ipv6-rule"
+            {
+              echo '#!/bin/sh'
+              echo '# Auto-injected from Actions variable FIREWALL_IPV6_RULE'
+              echo "cat >> /etc/config/firewall <<'__IMMRT_RULES_EOF__'"
+              printf '%s\n' "$FIREWALL_IPV6_RULE"
+              echo '__IMMRT_RULES_EOF__'
+              echo 'exit 0'
+            } > "$DEST"
+            echo "Firewall IPv6 rule injected to $DEST"
+            cat "$DEST"
+          else
+            echo "No FIREWALL_IPV6_RULE variable, skipping"
+          fi
+
+      - name: Inject NPC config
+        env:
+          NPC_CONFIG: ${{ vars.NPC_CONFIG }}
+        run: |
+          if [ -n "$NPC_CONFIG" ]; then
+            # Full replacement of /etc/config/npc via a first-boot uci-defaults
+            # script (the npc package ships from a feed, so there is no repo
+            # source file to overwrite at build time).
+            DEST="target/linux/airoha/an7581/base-files/etc/uci-defaults/99-npc-config"
+            {
+              echo '#!/bin/sh'
+              echo '# Auto-injected from Actions variable NPC_CONFIG'
+              echo "cat > /etc/config/npc <<'__IMMRT_NPC_CONFIG_EOF__'"
+              printf '%s\n' "$NPC_CONFIG"
+              echo '__IMMRT_NPC_CONFIG_EOF__'
+              echo 'exit 0'
+            } > "$DEST"
+            echo "NPC config injected to $DEST"
+            cat "$DEST"
+          else
+            echo "No NPC_CONFIG variable, skipping"
+          fi
+
+      - name: Inject Tailscale config
+        env:
+          TAILSCALE_CONFIG: ${{ vars.TAILSCALE_CONFIG }}
+        run: |
+          if [ -n "$TAILSCALE_CONFIG" ]; then
+            # Full replacement of /etc/config/tailscale via a first-boot
+            # uci-defaults script.
+            DEST="target/linux/airoha/an7581/base-files/etc/uci-defaults/99-tailscale-config"
+            {
+              echo '#!/bin/sh'
+              echo '# Auto-injected from Actions variable TAILSCALE_CONFIG'
+              echo "cat > /etc/config/tailscale <<'__IMMRT_TAILSCALE_CONFIG_EOF__'"
+              printf '%s\n' "$TAILSCALE_CONFIG"
+              echo '__IMMRT_TAILSCALE_CONFIG_EOF__'
+              echo 'exit 0'
+            } > "$DEST"
+            echo "Tailscale config injected to $DEST"
+            cat "$DEST"
+          else
+            echo "No TAILSCALE_CONFIG variable, skipping"
+          fi
+
+      - name: Inject WOL config
+        env:
+          WOL_CONFIG: ${{ vars.WOL_CONFIG }}
+        run: |
+          if [ -n "$WOL_CONFIG" ]; then
+            # Full replacement of /etc/config/luci-wol via a first-boot
+            # uci-defaults script.
+            DEST="target/linux/airoha/an7581/base-files/etc/uci-defaults/99-wol-config"
+            {
+              echo '#!/bin/sh'
+              echo '# Auto-injected from Actions variable WOL_CONFIG'
+              echo "cat > /etc/config/luci-wol <<'__IMMRT_WOL_CONFIG_EOF__'"
+              printf '%s\n' "$WOL_CONFIG"
+              echo '__IMMRT_WOL_CONFIG_EOF__'
+              echo 'exit 0'
+            } > "$DEST"
+            echo "WOL config injected to $DEST"
+            cat "$DEST"
+          else
+            echo "No WOL_CONFIG variable, skipping"
+          fi
+
+      - name: Inject WiFi config
+        env:
+          WIFI_SSID: ${{ vars.WIFI_SSID }}
+          WIFI_PASSWORD: ${{ vars.WIFI_PASSWORD }}
+        run: |
+          WIFI_FILE="target/linux/airoha/an7581/base-files/etc/board.d/03_wifi_defaults"
+          if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PASSWORD" ]; then
+            # Trim a possible trailing CR/LF carried by the Actions variable.
+            WIFI_SSID="${WIFI_SSID%$'\r'}"; WIFI_SSID="${WIFI_SSID%$'\n'}"
+            WIFI_PASSWORD="${WIFI_PASSWORD%$'\r'}"; WIFI_PASSWORD="${WIFI_PASSWORD%$'\n'}"
+
+            sed -i "s|ucidef_set_wireless 2g '.*' 'psk2' '.*'|ucidef_set_wireless 2g '${WIFI_SSID}' 'psk2' '${WIFI_PASSWORD}'|" "$WIFI_FILE"
+            sed -i "s|ucidef_set_wireless 5g '.*' 'sae-mixed' '.*'|ucidef_set_wireless 5g '${WIFI_SSID}' 'sae-mixed' '${WIFI_PASSWORD}'|" "$WIFI_FILE"
+            sed -i "s|ucidef_set_wireless 6g '.*' 'sae' '.*'|ucidef_set_wireless 6g '${WIFI_SSID}-6G' 'sae' '${WIFI_PASSWORD}'|" "$WIFI_FILE"
+
+            echo "WiFi SSID=${WIFI_SSID} injected:"
+            grep -n "ucidef_set_wireless" "$WIFI_FILE"
+
+            # Fail loudly instead of silently shipping default SSIDs.
+            grep -q "ucidef_set_wireless 2g '${WIFI_SSID}'" "$WIFI_FILE" || {
+              echo "ERROR: 2g SSID replacement did not match, aborting"
+              exit 1
+            }
+          else
+            echo "WIFI_SSID and/or WIFI_PASSWORD are empty (checked vars.WIFI_SSID / vars.WIFI_PASSWORD)."
+            echo "Set them at: repo Settings > Secrets and variables > Actions > Variables (repo scope)."
+          fi
+
+      - name: Inject LAN IP
+        env:
+          LAN_IP: ${{ vars.LAN_IP }}
+        run: |
+          if [ -n "$LAN_IP" ]; then
+            sed -i 's|ipad=${ipaddr:-"192.168.50.1"}|ipad=${ipaddr:-"'"${LAN_IP}"'"}|' \
+              package/base-files/files/bin/config_generate
+            echo "LAN IP=${LAN_IP} injected"
+          else
+            echo "No LAN_IP variable, using default 192.168.50.1"
+          fi
 
       - name: Install feeds
         run: |
@@ -55,6 +238,9 @@ jobs:
         run: |
           cp config.seed .config
           make defconfig
+          sed -i 's/^CONFIG_FEED_nps=.*/CONFIG_FEED_nps=n/' .config
+          sed -i 's/^CONFIG_FEED_openclash=.*/CONFIG_FEED_openclash=n/' .config
+          sed -i 's/^CONFIG_FEED_tailscale=.*/CONFIG_FEED_tailscale=n/' .config
 
       - name: Download sources
         run: make download -j$(nproc)
@@ -92,42 +278,3 @@ jobs:
             bin/targets/airoha/an7581/sha256sums
           retention-days: 30
         if: always()
-
-      - name: Build release body
-        if: github.event.inputs.release_type != 'none'
-        id: release_body
-        env:
-          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
-        run: |
-          {
-            printf '%s\n' "$RELEASE_NOTES"
-            echo ""
-            echo "---"
-            echo ""
-            echo "如果您觉得对您有帮助，请我喝杯咖啡吧，让我更有动力持续更新。"
-            echo ""
-            echo '<img width="400" height="400" alt="c6ea388c976395326514814f80d512d5" src="https://github.com/user-attachments/assets/0ac90d58-ac73-4dc1-b926-276e539e5d0f" />'
-          } > /tmp/release_body.md
-          {
-            echo "body<<EOF"
-            cat /tmp/release_body.md
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        if: github.event.inputs.release_type != 'none'
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ format('{0}-{1}', steps.date.outputs.date, steps.commit.outputs.short) }}
-          name: ${{ format('{0} - XR1710G Build ({1})', steps.date.outputs.date, steps.commit.outputs.short) }}
-          body: ${{ steps.release_body.outputs.body }}
-          draft: false
-          prerelease: ${{ github.event.inputs.release_type == 'prerelease' }}
-          files: |
-            bin/targets/airoha/an7581/*.itb
-            bin/targets/airoha/an7581/config.buildinfo
-            bin/targets/airoha/an7581/feeds.buildinfo
-            bin/targets/airoha/an7581/version.buildinfo
-            bin/targets/airoha/an7581/sha256sums
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
