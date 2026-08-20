@@ -53,7 +53,17 @@ jobs:
 
       - name: Push to dev
         if: steps.check.outputs.has_updates == 'true'
-        run: git push origin dev
+        run: |
+          # Merge any concurrently-pushed origin/dev changes before pushing,
+          # otherwise a race with another sync/manual push rejects the push
+          # with a non-fast-forward error.
+          git fetch origin dev
+          git merge --no-edit origin/dev || {
+            echo "::error::Conflict with concurrent origin/dev changes"
+            git diff --name-only --diff-filter=U
+            exit 1
+          }
+          git push origin dev
 
       - name: Trigger build
         if: steps.check.outputs.has_updates == 'true'
