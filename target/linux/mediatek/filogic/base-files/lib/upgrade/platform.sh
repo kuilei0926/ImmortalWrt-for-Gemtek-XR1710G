@@ -143,6 +143,7 @@ platform_do_upgrade() {
 	bananapi,bpi-r4-2g5|\
 	bananapi,bpi-r4-poe|\
 	bananapi,bpi-r4-lite|\
+	bananapi,bpi-r4-pro-8x|\
 	bazis,ax3000wm|\
 	cetron,ct3003-ubootmod|\
 	cmcc,a10-ubootmod|\
@@ -169,6 +170,7 @@ platform_do_upgrade() {
 	livinet,zr-3020-ubootmod|\
 	mediatek,mt7981-rfb|\
 	mediatek,mt7988a-rfb|\
+	mercusys,mr85x-ubi|\
 	mercusys,mr90x-v1-ubi|\
 	netis,eap930-v1|\
 	netis,n6-v2|\
@@ -286,7 +288,6 @@ platform_do_upgrade() {
 	kebidumei,ax3000-u22|\
 	totolink,x6000r|\
 	wavlink,wl-wn573hx3|\
-	wavlink,wl-wnt100x3|\
 	widelantech,wap430x|\
 	yuncore,ax835)
 		default_do_upgrade "$1"
@@ -397,6 +398,7 @@ platform_check_image() {
 	bananapi,bpi-r4-2g5|\
 	bananapi,bpi-r4-poe|\
 	bananapi,bpi-r4-lite|\
+	bananapi,bpi-r4-pro-8x|\
 	bazis,ax3000wm|\
 	cetron,ct3003-ubootmod|\
 	cmcc,a10-ubootmod|\
@@ -423,6 +425,7 @@ platform_check_image() {
 	livinet,zr-3020-ubootmod|\
 	mediatek,mt7981-rfb|\
 	mediatek,mt7988a-rfb|\
+	mercusys,mr85x-ubi|\
 	mercusys,mr90x-v1-ubi|\
 	nokia,ea0326gmp|\
 	netis,eap930-v1|\
@@ -508,6 +511,7 @@ platform_copy_config() {
 	bananapi,bpi-r4-2g5|\
 	bananapi,bpi-r4-poe|\
 	bananapi,bpi-r4-lite|\
+	bananapi,bpi-r4-pro-8x|\
 	cmcc,rax3000m|\
 	cmcc,rax3000me|\
 	gatonetworks,gdsp|\
