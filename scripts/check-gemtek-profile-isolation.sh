@@ -91,8 +91,15 @@ if grep -En "^CONFIG_(PACKAGE|DEFAULT)_${forbidden_packages}=y$" "$config_file";
 fi
 
 for package in "${required_packages[@]}"; do
-	if ! grep -Fqx "CONFIG_PACKAGE_${package}=y" "$config_file"; then
-		echo "$profile config is missing required package: $package" >&2
+	package_enabled=0
+	grep -Fqx "CONFIG_PACKAGE_${package}=y" "$config_file" && package_enabled=1
+	if (( package_enabled == 0 )) &&
+		grep -Fqx 'CONFIG_TARGET_PER_DEVICE_ROOTFS=y' "$config_file" &&
+		grep -Fqx "CONFIG_PACKAGE_${package}=m" "$config_file"; then
+		package_enabled=1
+	fi
+	if (( package_enabled == 0 )); then
+		echo "$profile config is missing required package or has it disabled: $package" >&2
 		failed=1
 	fi
 done
