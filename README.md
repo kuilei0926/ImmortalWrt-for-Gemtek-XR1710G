@@ -1,3 +1,7 @@
+# 本固件仅个人编译自用，请勿下载
+# 本固件仅个人编译自用，请勿下载
+# 本固件仅个人编译自用，请勿下载
+
 <img src="https://avatars.githubusercontent.com/u/53193414?s=200&v=4" alt="logo" width="200" height="200" align="right">
 
 # ImmortalWrt-for-Gemtek-brightspeed XR1710G & XG2010G
