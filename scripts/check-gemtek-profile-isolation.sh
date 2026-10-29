@@ -90,6 +90,12 @@ if grep -En "^CONFIG_(PACKAGE|DEFAULT)_${forbidden_packages}=y$" "$config_file";
 	failed=1
 fi
 
+if grep -Fqx 'CONFIG_PACKAGE_luci-app-tailscale=y' "$config_file" &&
+	grep -Fqx 'CONFIG_PACKAGE_tailscale=y' "$config_file"; then
+	echo "$profile config selects two packages that own /etc/config/tailscale and /etc/init.d/tailscale" >&2
+	failed=1
+fi
+
 for package in "${required_packages[@]}"; do
 	package_enabled=0
 	grep -Fqx "CONFIG_PACKAGE_${package}=y" "$config_file" && package_enabled=1
