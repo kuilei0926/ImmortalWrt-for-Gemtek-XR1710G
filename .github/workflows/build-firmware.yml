@@ -298,13 +298,19 @@ jobs:
           if [ -n "$failed_pkg" ]; then
             echo "=== Rebuilding $failed_pkg with V=s ==="
             make "$failed_pkg/compile" V=s -j1 2>&1 | tee build-verbose.log || true
+          elif grep -q 'make\[2\] package/install' build.log; then
+            echo "=== Retrying package/install with V=s ==="
+            make package/install V=s -j1 2>&1 | tee build-verbose.log || true
+          else
+            echo "No failing package found in build.log" >&2
+            tail -150 build.log || true
+          fi
+
+          if [ -s build-verbose.log ]; then
             echo "=== First errors in build-verbose.log ==="
             grep -nE "error:|Error [0-9]|FAILED|Patch failed|No rule to make target" build-verbose.log | head -40 || true
             echo "=== tail of build-verbose.log ==="
             tail -80 build-verbose.log || true
-          else
-            echo "No failing package found in build.log" >&2
-            tail -150 build.log || true
           fi
 
       - name: Verify device isolation
